@@ -1,0 +1,2 @@
+"""Player asset moderation example."""
+

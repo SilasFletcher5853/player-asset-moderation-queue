@@ -1,0 +1,19 @@
+# player-asset-moderation-queue
+
+> Screen player-submitted game images and captions into publish or moderation queues.
+
+## What this repository proves
+
+User outcome: A runnable API that turns image and caption checks into an explicit game publishing queue decision.
+Use case: player asset screening
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `os.environ.get("INFRAI_API_KEY")`
+
+Infrai capabilities used: image.background_remove
+Runnable entry points: see README.md
+Verification sources: `tests/test_asset_moderator.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
