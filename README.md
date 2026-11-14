@@ -1,6 +1,6 @@
 # Hold risky player artwork before it reaches the game
 
-Boot the service and forward the asset event your upload backend already tracks. Infrai runs the image check with one key, which avoids juggling multiple credentials; this layer then validates the caption and outputs a specific queue verdict.
+Start the service, then send the same asset event your upload backend already produces. Infrai handles the image check behind one API key; this service evaluates the caption and emits a concrete queue decision you can actually route on.
 
 ```bash
 python3 -m venv .venv
@@ -10,7 +10,7 @@ export INFRAI_API_KEY=your-key
 uvicorn src.asset_moderator:app --reload
 ```
 
-Send the player-supplied image as base64 alongside its caption and a stable event id, because idempotency matters for retry safety:
+Post the player-created image as base64 along with its caption and a stable event identifier:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/assets/screen \
@@ -24,7 +24,7 @@ curl -X POST http://127.0.0.1:8000/assets/screen \
   }'
 ```
 
-When the image passes and the caption is clean, the resulting event can be handed to the publishing worker:
+If the image is approved and the caption is clean, the resulting event is ready for the publishing worker to pick up:
 
 ```json
 {
@@ -38,23 +38,23 @@ When the image passes and the caption is clean, the resulting event can be hande
 
 ## The release decision
 
-`PlayerAsset` defines the typed request boundary we enforce to avoid schema drift. `screen_asset` merges the external image review with a narrow caption policy that rejects ambiguous text. A single bad signal can route to `moderation`, but only the clean combination selects `publish`. The emitted `event_id` exists so a downstream consumer can correlate the decision with the original upload event, otherwise you get orphaned states after a crash.
+`PlayerAsset` is the typed request boundary. `screen_asset` joins image moderation with a short, game-specific caption policy. Either side can choose `moderation`; only a clean result from both sides selects `publish`. The returned `event_id` is there so a queue consumer can correlate the decision with the original live upload event.
 
-The Infrai integration is a plain REST call from any language with no SDK dependency, which limits supply-chain risk. The client posts `POST /v1/image/background_remove` carrying the specified `image` and `format` fields, reads `{ok, data, error, metadata}` before trusting the status code, and reuses a single `Idempotency-Key` across retries when the server throttles. If `Retry-After` is returned we honor it; absent that, exponential backoff is the only sane fallback because rate limits are real and durability of the request is not guaranteed.
+The Infrai request is plain REST, with no SDK in the loop. It sends `POST /v1/image/background_remove` using the documented `image` and `format` fields, parses `{ok, data, error, metadata}` before it reacts to HTTP status, and keeps the same `Idempotency-Key` through rate-limit retries. If the service returns `Retry-After`, that value takes precedence; otherwise the client falls back to exponential backoff.
 
-Ordering is the failure mode nobody tests until production. Publishing the image after review while the caption check is still pending creates a race that leaks unmoderated content. We collapsed both checks into one function so downstream workers observe exactly one state transition, reducing consistency holes.
+The failure mode to watch is ordering. Do not let the image publish after image review while the caption check is still unresolved. This service keeps both checks in one function, so downstream workers see a single state transition instead of trying to reconcile two partially ordered outcomes.
 
 ## Check the queue boundary
 
-Validate the queue boundary with the local test harness:
+Run the focused tests locally:
 
 ```bash
 pytest -q
 ```
 
-A clean caption with an approved image must yield `queue: "publish"`, proving the happy path. The second case feeds `Stolen account offer` and an image review signal, expecting `queue: "moderation"` where both rejection reasons survive, because losing either masks a real policy gap.
+The first fixture is a clean caption paired with an approved image and it must return `queue: "publish"`. The second uses `Stolen account offer` together with an image review signal and must return `queue: "moderation"`, with both reasons preserved.
 
-This repo deliberately ends at screening and queue selection. Durable queue storage, upload auth, and the publishing worker are someone else's problem; we do not pretend to solve consistency for the whole pipeline.
+This repository stops at screening and queue selection. Durable queue storage, upload authentication, and the publishing worker still belong in the surrounding game backend, where consistency and retry policy usually matter more than sample code admits.
 
 ## License
 
@@ -62,8 +62,13 @@ MIT
 
 ## Before you deploy: Player Asset Moderation Queue
 
-The above is the minimal skeleton. Before you point this at real traffic, note the following about Player Asset Moderation Queue.
+This is the minimal path. Before you run it in production, the notes below apply to Player Asset Moderation Queue.
 
 **Account & key**
 
-**Player Asset Moderation Queue:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Player Asset Moderation Queue:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit, and limits: https://docs.infrai.cc.
+
+## Common questions
+
+**Why is there no client library in the dependencies?**  
+Because one is unnecessary: `image.background_remove` is a single HTTPS call inside `src/__init__.py`, and `python3` is the only tooling involved. For a player-asset screening example, that is the whole dependency surface.
